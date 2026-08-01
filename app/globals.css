@@ -1,0 +1,180 @@
+@import "tailwindcss";
+
+/* ══════════════════════════════════════════════════════════
+   DocFlow Enterprise — Design System
+   Enterprise SaaS: สะอาด ทันสมัย น่าเชื่อถือ (สเปคหมวด 4, 37)
+   สีหลัก Navy/Slate/Indigo · Light + Dark mode · WCAG AA
+   ══════════════════════════════════════════════════════════ */
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --background: #f8fafc;
+  --surface: #ffffff;
+  --surface-muted: #f1f5f9;
+  --foreground: #0f172a;
+  --muted-foreground: #64748b;
+  --border: #e2e8f0;
+  --input: #e2e8f0;
+  --ring: #1e3a8a;
+
+  --primary: #1e3a8a;
+  --primary-hover: #1e40af;
+  --primary-foreground: #ffffff;
+
+  --accent: #eef2ff;
+  --accent-foreground: #3730a3;
+
+  --sidebar: #0f172a;
+  --sidebar-foreground: #cbd5e1;
+  --sidebar-active: #1e293b;
+  --sidebar-active-foreground: #ffffff;
+  --sidebar-border: #1e293b;
+
+  /* สีสถานะเอกสาร (สเปคหมวด 4) */
+  --status-draft: #64748b;
+  --status-review: #2563eb;
+  --status-pending: #d97706;
+  --status-approved: #059669;
+  --status-rejected: #dc2626;
+  --status-archived: #7c3aed;
+  --status-expired: #991b1b;
+  --status-published: #0891b2;
+
+  --success: #059669;
+  --warning: #d97706;
+  --danger: #dc2626;
+  --info: #2563eb;
+
+  --radius: 0.625rem;
+}
+
+.dark {
+  --background: #0b1120;
+  --surface: #0f172a;
+  --surface-muted: #1e293b;
+  --foreground: #e2e8f0;
+  --muted-foreground: #94a3b8;
+  --border: #1e293b;
+  --input: #334155;
+  --ring: #3b82f6;
+
+  --primary: #3b82f6;
+  --primary-hover: #60a5fa;
+  --primary-foreground: #0b1120;
+
+  --accent: #1e293b;
+  --accent-foreground: #bfdbfe;
+
+  --sidebar: #060a14;
+  --sidebar-foreground: #94a3b8;
+  --sidebar-active: #1e293b;
+  --sidebar-active-foreground: #ffffff;
+  --sidebar-border: #131c2e;
+
+  --status-draft: #94a3b8;
+  --status-review: #60a5fa;
+  --status-pending: #fbbf24;
+  --status-approved: #34d399;
+  --status-rejected: #f87171;
+  --status-archived: #a78bfa;
+  --status-expired: #fca5a5;
+  --status-published: #22d3ee;
+
+  --success: #34d399;
+  --warning: #fbbf24;
+  --danger: #f87171;
+  --info: #60a5fa;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-foreground: var(--foreground);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-active: var(--sidebar-active);
+  --color-sidebar-active-foreground: var(--sidebar-active-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --color-info: var(--info);
+
+  --font-sans: var(--font-ibm-plex-thai), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  /* Thai text: ป้องกันข้อความล้น + line-height ที่อ่านสบาย */
+  p, span, div, td, th, li, label, h1, h2, h3, h4 {
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
+  ::selection {
+    background-color: color-mix(in srgb, var(--primary) 25%, transparent);
+  }
+}
+
+/* Scrollbar ที่เข้ากับธีม */
+@layer utilities {
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: var(--border);
+    border-radius: 9999px;
+  }
+  .animate-in {
+    animation: fadeIn 0.2s ease-out;
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
