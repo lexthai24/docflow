@@ -8,6 +8,8 @@ import { getCurrentUser } from "@/lib/auth/dal";
 import { LoginSchema } from "@/lib/validations/auth";
 import { rateLimit, resetRateLimit } from "@/lib/rate-limit";
 import { audit, AUDIT, getRequestMeta } from "@/lib/audit";
+import { env } from "@/lib/env";
+import { actionError, actionOk, type ActionResult } from "@/lib/action-result";
 
 export interface LoginState {
   error?: string;
@@ -106,4 +108,82 @@ export async function logoutAction(): Promise<void> {
   }
   await destroySession();
   redirect("/login");
+}
+
+// ── Demo quick-login (สำหรับ demo เท่านั้น) ──
+// login ด้วย userId โดยไม่ต้องใส่รหัสผ่าน — เปิดเฉพาะเมื่อ DEMO_MODE=true
+// ป้องกันหลายชั้น: ตรวจ env, จำกัดเฉพาะ user demo (@docflow.local), rate limit
+
+export interface DemoUser {
+  id: string;
+  fullName: string;
+  email: string;
+  jobTitle: string | null;
+  roleName: string;
+  roleKey: string;
+}
+
+export async function demoLoginAction(userId: string): Promise<ActionResult> {
+  // 1. ต้องเปิด DEMO_MODE เท่านั้น (ตรวจฝั่ง server — client ปลอมไม่ได้)
+  if (!env.DEMO_MODE) {
+    return actionError("Demo mode ไม่ได้เปิดใช้งาน");
+  }
+
+  const meta = await getRequestMeta();
+  // 2. rate limit กันสแปม
+  const rl = rateLimit(`demo-login:${meta.ipAddress ?? "unknown"}`, 30, 60);
+  if (!rl.ok) {
+    return actionError("เข้าสู่ระบบบ่อยเกินไป กรุณารอสักครู่");
+  }
+
+  // 3. อนุญาตเฉพาะ user demo ที่ seed ไว้ (email @docflow.local, สถานะ ACTIVE)
+  const user = await db.user.findFirst({
+    where: {
+      id: userId,
+      status: "ACTIVE",
+      email: { endsWith: "@docflow.local" },
+    },
+    select: { id: true, organizationId: true },
+  });
+  if (!user) {
+    return actionError("ไม่พบบัญชี demo นี้");
+  }
+
+  await createSession(user.id, user.organizationId, meta);
+  await db.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
+  await audit({
+    organizationId: user.organizationId,
+    actorId: user.id,
+    action: AUDIT.LOGIN,
+    entityType: "User",
+    entityId: user.id,
+    metadata: { demo: true },
+  });
+
+  return actionOk(undefined);
+}
+
+/** ดึงรายชื่อ demo users สำหรับแสดงปุ่ม quick-login (เปิดเฉพาะ DEMO_MODE) */
+export async function getDemoUsers(): Promise<DemoUser[]> {
+  if (!env.DEMO_MODE) return [];
+  const users = await db.user.findMany({
+    where: { status: "ACTIVE", email: { endsWith: "@docflow.local" } },
+    orderBy: { createdAt: "asc" },
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      email: true,
+      jobTitle: true,
+      userRoles: { select: { role: { select: { name: true, key: true } } }, take: 1 },
+    },
+  });
+  return users.map((u) => ({
+    id: u.id,
+    fullName: `${u.firstName} ${u.lastName}`,
+    email: u.email,
+    jobTitle: u.jobTitle,
+    roleName: u.userRoles[0]?.role.name ?? "ผู้ใช้งาน",
+    roleKey: u.userRoles[0]?.role.key ?? "VIEWER",
+  }));
 }

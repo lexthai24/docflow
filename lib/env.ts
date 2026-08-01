@@ -22,6 +22,12 @@ const EnvSchema = z.object({
     .default("true")
     .transform((v) => v === "true"),
   MAX_UPLOAD_SIZE: z.coerce.number().int().positive().default(52428800),
+  // Demo mode: เปิด quick-login (คลิกเลือก user ไม่ต้องใส่รหัส) — สำหรับ demo เท่านั้น
+  DEMO_MODE: z
+    .string()
+    .optional()
+    .default("false")
+    .transform((v) => v === "true"),
 });
 
 function loadEnv() {

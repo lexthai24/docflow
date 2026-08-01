@@ -1,9 +1,17 @@
 import type { Metadata } from "next";
 import { LoginForm } from "./login-form";
+import { DemoLogin } from "./demo-login";
+import { getDemoUsers } from "@/app/(auth)/actions";
 
 export const metadata: Metadata = { title: "เข้าสู่ระบบ" };
 
-export default function LoginPage() {
+// อ่าน demo users จาก DB ตอน runtime (DEMO_MODE ต้องมีผลตอนรัน ไม่ใช่ตอน build)
+export const dynamic = "force-dynamic";
+
+export default async function LoginPage() {
+  // ดึง demo users (คืน [] ถ้า DEMO_MODE ปิด)
+  const demoUsers = await getDemoUsers();
+
   return (
     <div className="space-y-6">
       <div className="space-y-2">
@@ -13,6 +21,7 @@ export default function LoginPage() {
         </p>
       </div>
       <LoginForm />
+      <DemoLogin users={demoUsers} />
     </div>
   );
 }
