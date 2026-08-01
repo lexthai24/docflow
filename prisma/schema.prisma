@@ -1,0 +1,928 @@
+// DocFlow Enterprise — Prisma schema
+// PostgreSQL. Prisma 7 (prisma-client generator).
+// อ่านสถาปัตยกรรมใน README.md ประกอบ
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../lib/generated/prisma"
+  moduleFormat = "esm"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  INVITED
+}
+
+enum ConfidentialityLevel {
+  PUBLIC
+  INTERNAL
+  CONFIDENTIAL
+  RESTRICTED
+}
+
+enum Priority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum DocumentStatus {
+  DRAFT
+  IN_REVIEW
+  CHANGES_REQUESTED
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  PUBLISHED
+  EXPIRED
+  ARCHIVED
+}
+
+enum ApprovalDecisionType {
+  APPROVED
+  REJECTED
+  CHANGES_REQUESTED
+}
+
+enum WorkflowInstanceStatus {
+  IN_PROGRESS
+  APPROVED
+  REJECTED
+  CHANGES_REQUESTED
+  CANCELLED
+}
+
+enum WorkflowStepType {
+  REVIEW
+  APPROVAL
+}
+
+enum WorkflowStepMode {
+  SEQUENTIAL
+  PARALLEL_ALL
+  PARALLEL_ANY
+}
+
+enum ShareSubjectType {
+  USER
+  TEAM
+  DEPARTMENT
+  ROLE
+}
+
+enum AccessLevel {
+  VIEW
+  COMMENT
+  EDIT_METADATA
+  UPLOAD_VERSION
+  DOWNLOAD
+  SHARE
+  MANAGE
+  APPROVE
+}
+
+enum NotificationType {
+  DOCUMENT_SHARED
+  MENTIONED
+  REVIEW_REQUESTED
+  APPROVAL_REQUESTED
+  DOCUMENT_APPROVED
+  DOCUMENT_REJECTED
+  CHANGES_REQUESTED
+  NEW_VERSION
+  DOCUMENT_EXPIRING
+  ACCESS_EXPIRING
+  WORKFLOW_OVERDUE
+}
+
+enum MetadataFieldType {
+  TEXT
+  LONG_TEXT
+  NUMBER
+  DATE
+  BOOLEAN
+  SELECT
+  MULTI_SELECT
+  USER
+  DEPARTMENT
+  URL
+}
+
+enum OcrStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  NOT_REQUIRED
+}
+
+enum StorageProvider {
+  LOCAL
+  S3
+}
+
+enum RecentActionType {
+  VIEWED
+  EDITED
+  UPLOADED
+}
+
+// ============================================================
+// ORGANIZATION / TENANT
+// ============================================================
+
+model Organization {
+  id                String   @id @default(cuid())
+  name              String
+  slug              String   @unique
+  logoUrl           String?
+  faviconUrl        String?
+  address           String?
+  email             String?
+  phone             String?
+  timezone          String   @default("Asia/Bangkok")
+  locale            String   @default("th")
+  primaryColor      String   @default("#1e3a8a")
+  // JSON blob สำหรับ document-number template, upload rules, retention defaults, feature flags
+  settings          Json     @default("{}")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  users             User[]
+  departments       Department[]
+  teams             Team[]
+  roles             Role[]
+  folders           Folder[]
+  documents         Document[]
+  categories        Category[]
+  tags              Tag[]
+  metadataDefs      MetadataDefinition[]
+  workflowTemplates WorkflowTemplate[]
+  auditLogs         AuditLog[]
+  notifications     Notification[]
+  retentionPolicies RetentionPolicy[]
+  documentSequences DocumentSequence[]
+
+  @@index([slug])
+}
+
+// ============================================================
+// USERS / AUTH
+// ============================================================
+
+model User {
+  id             String     @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  email          String
+  passwordHash   String
+  firstName      String
+  lastName       String
+  avatarUrl      String?
+  jobTitle       String?
+  status         UserStatus @default(ACTIVE)
+
+  departmentId   String?
+  department     Department? @relation("DepartmentMembers", fields: [departmentId], references: [id], onDelete: SetNull)
+
+  lastLoginAt    DateTime?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  sessions            Session[]
+  userRoles           UserRole[]
+  teamMemberships     TeamMember[]
+  managedDepartments  Department[] @relation("DepartmentManager")
+  ledTeams            Team[]       @relation("TeamLead")
+
+  ownedFolders        Folder[]     @relation("FolderOwner")
+  ownedDocuments      Document[]   @relation("DocumentOwner")
+  createdVersions     DocumentVersion[]
+  comments            Comment[]
+  commentMentions     CommentMention[]
+  favorites           Favorite[]
+  recentDocuments     RecentDocument[]
+  savedSearches       SavedSearch[]
+  preference          UserPreference?
+  notifications       Notification[] @relation("NotificationRecipient")
+  auditLogs           AuditLog[]
+  workflowAssignments WorkflowAssignment[]
+  approvalDecisions   ApprovalDecision[]
+  createdShareLinks   ShareLink[]
+  grantedFolderPerms  FolderPermission[] @relation("FolderPermGrantedBy")
+  grantedDocPerms     DocumentPermission[] @relation("DocPermGrantedBy")
+  documentLocks       DocumentLock[]
+
+  @@unique([organizationId, email])
+  @@index([organizationId])
+  @@index([departmentId])
+  @@index([status])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash    String   @unique
+  ipAddress    String?
+  userAgent    String?
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+  lastActiveAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+// ============================================================
+// RBAC — Roles & Permissions
+// ============================================================
+
+model Role {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  key            String   // e.g. SUPER_ADMIN, ADMIN, ...
+  name           String
+  description    String?
+  isSystem       Boolean  @default(false) // system roles ห้ามลบ
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  rolePermissions RolePermission[]
+  userRoles       UserRole[]
+
+  @@unique([organizationId, key])
+  @@index([organizationId])
+}
+
+model Permission {
+  id          String @id @default(cuid())
+  key         String @unique // e.g. document.create
+  description String?
+
+  rolePermissions RolePermission[]
+}
+
+model RolePermission {
+  roleId       String
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permissionId String
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@index([permissionId])
+}
+
+model UserRole {
+  userId String
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  roleId String
+  role   Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@index([roleId])
+}
+
+// ============================================================
+// DEPARTMENTS / TEAMS
+// ============================================================
+
+model Department {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  code           String
+  description    String?
+  managerId      String?
+  manager        User?    @relation("DepartmentManager", fields: [managerId], references: [id], onDelete: SetNull)
+  parentId       String?
+  parent         Department?  @relation("DepartmentHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children       Department[] @relation("DepartmentHierarchy")
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  members   User[]     @relation("DepartmentMembers")
+  teams     Team[]
+  documents Document[]
+  folders   Folder[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@index([parentId])
+}
+
+model Team {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  departmentId   String?
+  department     Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  leadId         String?
+  lead           User?    @relation("TeamLead", fields: [leadId], references: [id], onDelete: SetNull)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  members TeamMember[]
+
+  @@index([organizationId])
+  @@index([departmentId])
+}
+
+model TeamMember {
+  teamId   String
+  team     Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  userId   String
+  user     User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  joinedAt DateTime @default(now())
+
+  @@id([teamId, userId])
+  @@index([userId])
+}
+
+// ============================================================
+// CATEGORIES / TAGS / METADATA
+// ============================================================
+
+model Category {
+  id                String   @id @default(cuid())
+  organizationId    String
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name              String
+  code              String
+  color             String   @default("#64748b")
+  icon              String?
+  description       String?
+  parentId          String?
+  parent            Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children          Category[] @relation("CategoryHierarchy")
+  retentionPolicyId String?
+  retentionPolicy   RetentionPolicy? @relation(fields: [retentionPolicyId], references: [id], onDelete: SetNull)
+  defaultWorkflowId String?
+  defaultWorkflow   WorkflowTemplate? @relation(fields: [defaultWorkflowId], references: [id], onDelete: SetNull)
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  documents         Document[]
+  metadataDefs      MetadataDefinition[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+}
+
+model Tag {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  color          String   @default("#64748b")
+  createdAt      DateTime @default(now())
+
+  documentTags DocumentTag[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+model DocumentTag {
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  tagId      String
+  tag        Tag      @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([documentId, tagId])
+  @@index([tagId])
+}
+
+model MetadataDefinition {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  categoryId     String?
+  category       Category? @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  key            String
+  label          String
+  fieldType      MetadataFieldType
+  required       Boolean  @default(false)
+  order          Int      @default(0)
+  // options สำหรับ SELECT / MULTI_SELECT: [{value,label}]
+  config         Json     @default("{}")
+  createdAt      DateTime @default(now())
+
+  values DocumentMetadataValue[]
+
+  @@index([organizationId])
+  @@index([categoryId])
+}
+
+model DocumentMetadataValue {
+  id           String   @id @default(cuid())
+  documentId   String
+  document     Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  definitionId String
+  definition   MetadataDefinition @relation(fields: [definitionId], references: [id], onDelete: Cascade)
+  // เก็บค่าเป็น JSON เพื่อรองรับทุก field type
+  value        Json
+
+  @@unique([documentId, definitionId])
+  @@index([definitionId])
+}
+
+// ============================================================
+// FOLDERS
+// ============================================================
+
+model Folder {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  description    String?
+  color          String?
+  icon           String?
+  parentId       String?
+  parent         Folder?  @relation("FolderHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children       Folder[] @relation("FolderHierarchy")
+  // materialized path เพื่อ query subtree เร็ว เช่น "/root/child/"
+  path           String   @default("/")
+  ownerId        String?
+  owner          User?    @relation("FolderOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  departmentId   String?
+  department     Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  archivedAt     DateTime?
+  deletedAt      DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  documents   Document[]
+  permissions FolderPermission[]
+
+  @@index([organizationId])
+  @@index([parentId])
+  @@index([ownerId])
+  @@index([departmentId])
+  @@index([deletedAt])
+  @@index([path])
+}
+
+model FolderPermission {
+  id          String @id @default(cuid())
+  folderId    String
+  folder      Folder @relation(fields: [folderId], references: [id], onDelete: Cascade)
+  subjectType ShareSubjectType
+  subjectId   String // userId / teamId / departmentId / roleId
+  accessLevel AccessLevel
+  isDeny      Boolean  @default(false) // explicit deny
+  grantedById String?
+  grantedBy   User?    @relation("FolderPermGrantedBy", fields: [grantedById], references: [id], onDelete: SetNull)
+  expiresAt   DateTime?
+  createdAt   DateTime @default(now())
+
+  @@index([folderId])
+  @@index([subjectType, subjectId])
+}
+
+// ============================================================
+// DOCUMENTS
+// ============================================================
+
+model Document {
+  id                   String   @id @default(cuid())
+  organizationId       String
+  organization         Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  documentNumber       String
+  title                String
+  description          String?
+
+  folderId             String?
+  folder               Folder?  @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  categoryId           String?
+  category             Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  ownerId              String
+  owner                User     @relation("DocumentOwner", fields: [ownerId], references: [id])
+  departmentId         String?
+  department           Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+
+  currentVersionId     String?  @unique
+  currentVersion       DocumentVersion? @relation("CurrentVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
+
+  status               DocumentStatus @default(DRAFT)
+  confidentialityLevel ConfidentialityLevel @default(INTERNAL)
+  priority             Priority @default(NORMAL)
+  language             String   @default("th")
+
+  customMetadata       Json     @default("{}")
+
+  issueDate            DateTime?
+  effectiveDate        DateTime?
+  expirationDate       DateTime?
+  reviewDate           DateTime?
+  retentionPeriodDays  Int?
+  legalHold            Boolean  @default(false)
+
+  // full-text search: เก็บ text ที่รวมชื่อ/เลข/desc/extracted แล้ว index ด้วย GIN
+  searchText           String   @default("")
+
+  archivedAt           DateTime?
+  deletedAt            DateTime?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  versions          DocumentVersion[] @relation("DocumentVersions")
+  tags              DocumentTag[]
+  metadataValues    DocumentMetadataValue[]
+  permissions       DocumentPermission[]
+  comments          Comment[]
+  favorites         Favorite[]
+  recentDocuments   RecentDocument[]
+  shareLinks        ShareLink[]
+  workflowInstances WorkflowInstance[]
+  lock              DocumentLock?
+  relationsFrom     DocumentRelation[] @relation("RelationSource")
+  relationsTo       DocumentRelation[] @relation("RelationTarget")
+
+  @@unique([organizationId, documentNumber])
+  @@index([organizationId])
+  @@index([folderId])
+  @@index([categoryId])
+  @@index([ownerId])
+  @@index([departmentId])
+  @@index([status])
+  @@index([confidentialityLevel])
+  @@index([expirationDate])
+  @@index([deletedAt])
+  @@index([updatedAt])
+}
+
+model DocumentVersion {
+  id             String   @id @default(cuid())
+  documentId     String
+  document       Document @relation("DocumentVersions", fields: [documentId], references: [id], onDelete: Cascade)
+  versionNumber  Int
+  changeNote     String?
+
+  storageProvider StorageProvider @default(LOCAL)
+  storageKey      String
+  originalFilename String
+  storedFilename   String
+  mimeType         String
+  extension        String
+  fileSize         BigInt
+  checksum         String // SHA-256
+
+  extractedText    String?
+  ocrStatus        OcrStatus @default(NOT_REQUIRED)
+
+  createdById    String
+  createdBy      User     @relation(fields: [createdById], references: [id])
+  isCurrent      Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  currentOf      Document? @relation("CurrentVersion")
+
+  @@unique([documentId, versionNumber])
+  @@index([documentId])
+  @@index([checksum])
+  @@index([createdById])
+}
+
+model DocumentPermission {
+  id          String @id @default(cuid())
+  documentId  String
+  document    Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  subjectType ShareSubjectType
+  subjectId   String
+  accessLevel AccessLevel
+  isDeny      Boolean  @default(false)
+  grantedById String?
+  grantedBy   User?    @relation("DocPermGrantedBy", fields: [grantedById], references: [id], onDelete: SetNull)
+  expiresAt   DateTime?
+  createdAt   DateTime @default(now())
+
+  @@index([documentId])
+  @@index([subjectType, subjectId])
+}
+
+model DocumentLock {
+  documentId String   @id
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  lockedById String
+  lockedBy   User     @relation(fields: [lockedById], references: [id], onDelete: Cascade)
+  reason     String?
+  lockedAt   DateTime @default(now())
+  expiresAt  DateTime?
+
+  @@index([lockedById])
+}
+
+model DocumentRelation {
+  id        String @id @default(cuid())
+  sourceId  String
+  source    Document @relation("RelationSource", fields: [sourceId], references: [id], onDelete: Cascade)
+  targetId  String
+  target    Document @relation("RelationTarget", fields: [targetId], references: [id], onDelete: Cascade)
+  kind      String   @default("RELATED") // RELATED / SUPERSEDES / REFERENCES
+  createdAt DateTime @default(now())
+
+  @@unique([sourceId, targetId, kind])
+  @@index([targetId])
+}
+
+// ============================================================
+// DOCUMENT NUMBER SEQUENCE
+// ============================================================
+
+model DocumentSequence {
+  id             String @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  scope          String // e.g. "DOC-2026" หรือ "HR-202608"
+  value          Int    @default(0)
+
+  @@unique([organizationId, scope])
+}
+
+// ============================================================
+// WORKFLOW
+// ============================================================
+
+model WorkflowTemplate {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  description    String?
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  steps      WorkflowStep[]
+  instances  WorkflowInstance[]
+  categories Category[]
+
+  @@index([organizationId])
+}
+
+model WorkflowStep {
+  id         String   @id @default(cuid())
+  templateId String
+  template   WorkflowTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  order      Int
+  name       String
+  type       WorkflowStepType
+  mode       WorkflowStepMode @default(SEQUENTIAL)
+  requireComment Boolean @default(false)
+  dueInDays  Int?
+  // รายชื่อ approver/reviewer เริ่มต้น: [{subjectType, subjectId}]
+  assignees  Json     @default("[]")
+
+  @@unique([templateId, order])
+  @@index([templateId])
+}
+
+model WorkflowInstance {
+  id           String   @id @default(cuid())
+  documentId   String
+  document     Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  templateId   String?
+  template     WorkflowTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  status       WorkflowInstanceStatus @default(IN_PROGRESS)
+  currentStepOrder Int  @default(0)
+  startedById  String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  completedAt  DateTime?
+
+  assignments WorkflowAssignment[]
+  decisions   ApprovalDecision[]
+
+  @@index([documentId])
+  @@index([status])
+}
+
+model WorkflowAssignment {
+  id         String   @id @default(cuid())
+  instanceId String
+  instance   WorkflowInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  stepOrder  Int
+  stepType   WorkflowStepType
+  assigneeId String
+  assignee   User     @relation(fields: [assigneeId], references: [id], onDelete: Cascade)
+  dueAt      DateTime?
+  completed  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@index([instanceId])
+  @@index([assigneeId])
+  @@index([completed])
+}
+
+model ApprovalDecision {
+  id         String   @id @default(cuid())
+  instanceId String
+  instance   WorkflowInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  stepOrder  Int
+  deciderId  String
+  decider    User     @relation(fields: [deciderId], references: [id], onDelete: Cascade)
+  decision   ApprovalDecisionType
+  reason     String?
+  createdAt  DateTime @default(now())
+
+  @@index([instanceId])
+  @@index([deciderId])
+}
+
+// ============================================================
+// COMMENTS
+// ============================================================
+
+model Comment {
+  id         String   @id @default(cuid())
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  authorId   String
+  author     User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  parentId   String?
+  parent     Comment? @relation("CommentThread", fields: [parentId], references: [id], onDelete: Cascade)
+  replies    Comment[] @relation("CommentThread")
+  body       String
+  isInternal Boolean  @default(false)
+  resolvedAt DateTime?
+  editedAt   DateTime?
+  deletedAt  DateTime?
+  createdAt  DateTime @default(now())
+
+  mentions CommentMention[]
+
+  @@index([documentId])
+  @@index([authorId])
+  @@index([parentId])
+}
+
+model CommentMention {
+  commentId String
+  comment   Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([commentId, userId])
+  @@index([userId])
+}
+
+// ============================================================
+// FAVORITES / RECENTS / SAVED SEARCH / PREFERENCES
+// ============================================================
+
+model Favorite {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  documentId String?
+  document   Document? @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  folderId   String?
+  createdAt  DateTime @default(now())
+
+  @@unique([userId, documentId])
+  @@index([userId])
+}
+
+model RecentDocument {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  action     RecentActionType @default(VIEWED)
+  viewedAt   DateTime @default(now())
+
+  @@unique([userId, documentId])
+  @@index([userId, viewedAt])
+}
+
+model SavedSearch {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  query     Json     @default("{}")
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model UserPreference {
+  userId        String  @id
+  user          User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  theme         String  @default("system") // light / dark / system
+  sidebarCollapsed Boolean @default(false)
+  compactMode   Boolean @default(false)
+  defaultView   String  @default("table") // table / list / grid
+  pageSize      Int     @default(20)
+  columns       Json    @default("[]")
+  notificationPrefs Json @default("{}")
+  updatedAt     DateTime @updatedAt
+}
+
+// ============================================================
+// SHARE LINKS
+// ============================================================
+
+model ShareLink {
+  id             String   @id @default(cuid())
+  documentId     String
+  document       Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  tokenHash      String   @unique
+  createdById    String
+  createdBy      User     @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  passwordHash   String?
+  allowDownload  Boolean  @default(false)
+  expiresAt      DateTime?
+  viewCount      Int      @default(0)
+  revokedAt      DateTime?
+  createdAt      DateTime @default(now())
+
+  @@index([documentId])
+  @@index([createdById])
+}
+
+// ============================================================
+// NOTIFICATIONS
+// ============================================================
+
+model Notification {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  recipientId    String
+  recipient      User     @relation("NotificationRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  type           NotificationType
+  title          String
+  body           String?
+  link           String?
+  data           Json     @default("{}")
+  readAt         DateTime?
+  createdAt      DateTime @default(now())
+
+  @@index([recipientId, readAt])
+  @@index([organizationId])
+}
+
+// ============================================================
+// RETENTION
+// ============================================================
+
+model RetentionPolicy {
+  id                String   @id @default(cuid())
+  organizationId    String
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name              String
+  retentionDays     Int
+  actionOnExpiry    String   @default("ARCHIVE") // ARCHIVE / REVIEW / NONE
+  reviewRequired    Boolean  @default(false)
+  createdAt         DateTime @default(now())
+
+  categories Category[]
+
+  @@index([organizationId])
+}
+
+// ============================================================
+// AUDIT LOG (append-only)
+// ============================================================
+
+model AuditLog {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  actorId        String?
+  actor          User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  action         String   // e.g. document.viewed
+  entityType     String   // e.g. Document
+  entityId       String?
+  oldValues      Json?
+  newValues      Json?
+  metadata       Json     @default("{}")
+  ipAddress      String?
+  userAgent      String?
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId, createdAt])
+  @@index([actorId])
+  @@index([entityType, entityId])
+  @@index([action])
+}
